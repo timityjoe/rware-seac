@@ -24,7 +24,9 @@ from envs import make_vec_envs
 from wrappers import RecordEpisodeStatistics, SquashDones
 from model import Policy
 
-import robotic_warehouse # noqa
+# import robotic_warehouse # noqa
+import rware
+
 import lbforaging # noqa
 
 ex = Experiment(ingredients=[algorithm])

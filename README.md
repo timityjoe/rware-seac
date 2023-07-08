@@ -19,7 +19,9 @@ cd seac
 And run:
 
 ```train
-python train.py with <env config>
+python3 train.py with <env config>
+python3 train.py with env_name=rware-tiny-2ag-v1 time_limit=500
+python3 train.py with env_name=rware-tiny-4ag-v1 time_limit=500
 ```
 
 Valid environment configs are: 
