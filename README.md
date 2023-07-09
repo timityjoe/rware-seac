@@ -10,6 +10,14 @@ For the experiments in LBF and RWARE, please install from:
 
 Also requires, PyTorch 1.6+
 
+## Installation & Setup
+```
+conda create --name conda38-rware-seac python=3.8
+conda activate conda38-rware-seac
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib/
+pip install -r requirements.txt
+```
+
 ## Training - SEAC
 To train the agents in the paper, navigate to the seac directory:
 ```
@@ -22,6 +30,7 @@ And run:
 python3 train.py with <env config>
 python3 train.py with env_name=rware-tiny-2ag-v1 time_limit=500
 python3 train.py with env_name=rware-tiny-4ag-v1 time_limit=500
+tensorboard --logdir='$WORKSPACE/marl/rware-seac' --port=8080 
 ```
 
 Valid environment configs are: 

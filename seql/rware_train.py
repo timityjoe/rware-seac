@@ -4,7 +4,7 @@ import numpy as np
 
 import gym
 
-import robotic_warehouse
+import rware
 
 from wrappers import RecordEpisodeStatistics
 

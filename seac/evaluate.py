@@ -1,10 +1,12 @@
 import torch
-import robotic_warehouse
+# import robotic_warehouse
+import rware
 import lbforaging
 import gym
 
 from a2c import A2C
 from wrappers import RecordEpisodeStatistics, TimeLimit
+import time
 
 path = "pretrained/rware-small-4ag"
 env_name = "rware-small-4ag-v1"
@@ -18,6 +20,7 @@ env = RecordEpisodeStatistics(env)
 
 agents = [
     A2C(i, osp, asp, 0.1, 0.1, False, 1, 1, "cpu")
+    # A2C(i, osp, asp, 0.1, 0.1, False, 1, 1, "opengl")
     for i, (osp, asp) in enumerate(zip(env.observation_space, env.action_space))
 ]
 
@@ -30,6 +33,10 @@ for i in range(RUN_STEPS):
     obs = [torch.from_numpy(o) for o in obs]
     _, actions, _ , _ = zip(*[agent.model.act(obs[agent.agent_id], None, None) for agent in agents])
     actions = [a.item() for a in actions]
+
+    # Mod by Tim: slow down to observe
+    time.sleep(0.2)
+
     env.render()
     obs, _, done, info = env.step(actions)
     if all(done):
