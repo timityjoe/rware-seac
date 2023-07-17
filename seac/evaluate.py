@@ -1,7 +1,7 @@
 import torch
 # import robotic_warehouse
 import rware
-import lbforaging
+# import lbforaging
 import gym
 
 from a2c import A2C
@@ -9,7 +9,8 @@ from wrappers import RecordEpisodeStatistics, TimeLimit
 import time
 
 path = "pretrained/rware-small-4ag"
-env_name = "rware-small-4ag-v1"
+# env_name = "rware-small-4ag-v1"
+env_name = "rware-large-4ag-v1"
 time_limit = 500 # 25 for LBF
 
 RUN_STEPS = 1500

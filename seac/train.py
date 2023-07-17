@@ -26,8 +26,10 @@ from model import Policy
 
 # import robotic_warehouse # noqa
 import rware
-
 import lbforaging # noqa
+
+from tqdm import tqdm
+from loguru import logger
 
 ex = Experiment(ingredients=[algorithm])
 ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
@@ -91,6 +93,7 @@ def evaluate(
     _log,
 ):
     device = algorithm["device"]
+    logger.info(f"device:{device}")
 
     eval_envs = make_vec_envs(
         env_name,
@@ -102,6 +105,7 @@ def evaluate(
         device,
         monitor_dir=monitor_dir,
     )
+    logger.info(f"eval_envs:{eval_envs}")
 
     n_obs = eval_envs.reset()
     n_recurrent_hidden_states = [
@@ -186,6 +190,8 @@ def main(
         wrappers,
         algorithm["device"],
     )
+    logger.info(f"env_name:{env_name}")
+    logger.info(f"envs:{envs}")
 
     agents = [
         A2C(i, osp, asp)
@@ -201,10 +207,11 @@ def main(
     num_updates = (
         int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
     )
+    logger.info(f"num_updates:{num_updates}")
 
     all_infos = deque(maxlen=10)
 
-    for j in range(1, num_updates + 1):
+    for j in tqdm(range(1, num_updates + 1)):
 
         for step in range(algorithm["num_steps"]):
             # Sample actions
@@ -243,7 +250,7 @@ def main(
                     masks,
                     bad_masks,
                 )
-
+                
             for info in infos:
                 if info:
                     all_infos.append(info)
@@ -257,6 +264,7 @@ def main(
             for k, v in loss.items():
                 if writer:
                     writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
+
 
         for agent in agents:
             agent.storage.after_update()
