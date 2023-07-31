@@ -24,7 +24,7 @@ Markdown==3.3.4
 matplotlib==3.4.1
 munch==2.5.0
 networkx==2.5.1
-numpy==1.20.2
+numpy==1.21.0
 oauthlib==3.1.0
 packaging==20.9
 pandas==1.2.4
@@ -52,7 +52,6 @@ stable-baselines3==1.0
 
 # Install tensorflow==2.4.1, but not tensorboard==2.4.1, 
 # as it will cancel out tensorboard within pip
-# tensorboard==2.4.1
 tensorflow==2.4.1
 
 tensorboard-plugin-wit==1.8.0
