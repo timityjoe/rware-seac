@@ -12,20 +12,20 @@ import torch
 from sacred import Experiment
 from sacred.observers import (  # noqa
     FileStorageObserver,
-    MongoObserver,
-    QueuedMongoObserver,
-    QueueObserver,
+    # MongoObserver,
+    # QueuedMongoObserver,
+    # QueueObserver,
 )
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from a2c import A2C, algorithm
-from envs import make_vec_envs
-from wrappers import RecordEpisodeStatistics, SquashDones
-from model import Policy
+from seac.a2c import A2C, algorithm
+from seac.envs import make_vec_envs
+from seac.wrappers import RecordEpisodeStatistics, SquashDones
+from seac.model import Policy
 
 import rware
 # from utils import cleanup_log_dir
-import utils
+import seac.utils as utils
 
 import logging
 from tqdm import tqdm
@@ -252,6 +252,31 @@ def do_sample_action(agents, envs, step, all_infos):
             all_infos.append(info)
 
 
+def initalize_seac(agents, num_env_steps, algorithm, envs):
+    obs = envs.reset()
+
+    for i in range(len(obs)):
+        agents[i].storage.obs[0].copy_(obs[i])
+        agents[i].storage.to(algorithm["device"])
+
+    start = time.time()
+    num_updates = (
+        int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
+    )
+    logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
+
+    algo_num_steps = algorithm["num_steps"] # 5
+    logger.info(f"algorithm[num_steps]:{algo_num_steps}")
+
+    algo_num_processes = algorithm["num_processes"] # 4
+    logger.info(f"algorithm[num_processes]:{algo_num_processes}")
+
+    logger.info(f"num_updates:{num_updates}") # 5000000
+
+    all_infos = deque(maxlen=10)   
+    return all_infos, start, num_updates
+
+
 @ex.automain
 def main(
     _run,
@@ -270,7 +295,7 @@ def main(
     save_interval,
     eval_interval,
 ):
-    
+    logger.info(".")
     if loss_dir:
         loss_dir = path.expanduser(loss_dir.format(id=str(_run._id)))
         utils.cleanup_log_dir(loss_dir)
@@ -305,29 +330,7 @@ def main(
         A2C(i, osp, asp)
         for i, (osp, asp) in enumerate(zip(envs.observation_space, envs.action_space))
     ]
-    logger.info(f"agents:{agents}")
-
-    obs = envs.reset()
-
-    for i in range(len(obs)):
-        agents[i].storage.obs[0].copy_(obs[i])
-        agents[i].storage.to(algorithm["device"])
-
-    start = time.time()
-    num_updates = (
-        int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
-    )
-    logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
-
-    algo_num_steps = algorithm["num_steps"] # 5
-    logger.info(f"algorithm[num_steps]:{algo_num_steps}")
-
-    algo_num_processes = algorithm["num_processes"] # 4
-    logger.info(f"algorithm[num_processes]:{algo_num_processes}")
-
-    logger.info(f"num_updates:{num_updates}") # 5000000
-
-    all_infos = deque(maxlen=10)
+    all_infos, start, num_updates = initalize_seac(agents, num_env_steps, algorithm, envs)
 
     # for j in range(1, num_updates + 1):
     for j in tqdm(range(1, num_updates + 1)):
