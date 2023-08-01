@@ -1,6 +1,4 @@
 # python3
-## ----------------------------------------------------------------------------------------
-## ----------------------------------------------------------------------------------------
 # RAWRE SEAC additions
 # See https://sacred.readthedocs.io/en/stable/experiment.html
 # Removing Sacred from this class
@@ -12,6 +10,8 @@ from collections import deque
 from os import path
 from pathlib import Path
 
+import numpy as np
+import torch
 from sacred import Experiment
 from sacred.observers import (  # noqa
     FileStorageObserver,
@@ -21,11 +21,11 @@ from sacred.observers import (  # noqa
 )
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from seac.a2c import A2C, algorithm
-from seac.envs import make_vec_envs
-from seac.wrappers import RecordEpisodeStatistics, SquashDones
-from seac.model import Policy
-from seac.utils import cleanup_log_dir
+from a2c import A2C, algorithm
+from envs import make_vec_envs
+from wrappers import RecordEpisodeStatistics, SquashDones
+from model import Policy
+from utils import cleanup_log_dir
 
 import logging
 from tqdm import tqdm
@@ -36,7 +36,6 @@ import argparse
 import random
 from datetime import datetime
 
-
 ex = Experiment(ingredients=[algorithm])
 ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
 ex.observers.append(FileStorageObserver("./results/sacred"))
@@ -46,18 +45,6 @@ logging.basicConfig(
     format="(%(process)d) [%(levelname).1s] - (%(asctime)s) - %(name)s >> %(message)s",
     datefmt="%m/%d %H:%M:%S",
 )
-
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    # parser.add_argument("num_env_steps", help="num_env_steps", type=int)
-    parser.add_argument("env_name", help="env_name", type=str)
-    # parser.add_argument("seed", help="seed", type=int)
-    # parser.add_argument("time_limit", help="time_limit", type=int)
-    args = parser.parse_args()
-
-    sTrainer = SeacTrainer(args.env_name)
-    sTrainer.config()
-    sTrainer.train()
 
 
 class SeacTrainer:
@@ -140,7 +127,6 @@ class SeacTrainer:
 
         all_infos = deque(maxlen=10)
 
-    @ex.config
     def config(self):
         self._env_name = None
         self._time_limit = None
@@ -241,6 +227,107 @@ class SeacTrainer:
             f"Evaluation using {len(all_infos)} episodes: mean reward {info['episode_reward']:.5f}\n"
         )
 
+
+    def do_update(self, j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates):
+        for step in range(algorithm["num_steps"]):
+            self.do_sample_action(agents, envs, step, all_infos)
+
+        # value_loss, action_loss, dist_entropy = agent.update(rollouts)
+        for agent in agents:
+            agent.compute_returns()
+
+        for agent in agents:
+            loss = agent.update([a.storage for a in agents])
+            for k, v in loss.items():
+                if writer:
+                    writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
+
+        for agent in agents:
+            agent.storage.after_update()
+
+        if j % log_interval == 0 and len(all_infos) > 1:
+            squashed = _squash_info(all_infos)
+
+            total_num_steps = (
+                (j + 1) * algorithm["num_processes"] * algorithm["num_steps"]
+            )
+            end = time.time()
+            _log.info(
+                f"Updates {j}, num timesteps {total_num_steps}, FPS {int(total_num_steps / (end - start))}"
+            )
+            _log.info(
+                f"Last {len(all_infos)} training episodes mean reward {squashed['episode_reward'].sum():.3f}"
+            )
+
+            for k, v in squashed.items():
+                _run.log_scalar(k, v, j)
+            all_infos.clear()
+
+        if save_interval is not None and (
+            j > 0 and j % save_interval == 0 or j == num_updates
+        ):
+            cur_save_dir = path.join(save_dir, f"u{j}")
+            for agent in agents:
+                save_at = path.join(cur_save_dir, f"agent{agent.agent_id}")
+                os.makedirs(save_at, exist_ok=True)
+                agent.save(save_at)
+            archive_name = shutil.make_archive(cur_save_dir, "xztar", save_dir, f"u{j}")
+            shutil.rmtree(cur_save_dir)
+            _run.add_artifact(archive_name)
+
+        if eval_interval is not None and (
+            j > 0 and j % eval_interval == 0 or j == num_updates
+        ):
+            evaluate(
+                agents, os.path.join(eval_dir, f"u{j}"),
+            )
+            videos = glob.glob(os.path.join(eval_dir, f"u{j}") + "/*.mp4")
+            for i, v in enumerate(videos):
+                _run.add_artifact(v, f"u{j}.{i}.mp4")
+
+
+    def do_sample_action(self, agents, envs, step, all_infos):
+        # Sample actions
+        with torch.no_grad():
+            n_value, n_action, n_action_log_prob, n_recurrent_hidden_states = zip(
+                *[
+                    agent.model.act(
+                        agent.storage.obs[step],
+                        agent.storage.recurrent_hidden_states[step],
+                        agent.storage.masks[step],
+                    )
+                    for agent in agents
+                ]
+            )
+        # Obser reward and next obs
+        obs, reward, done, infos = envs.step(n_action)
+        # envs.envs[0].render()
+
+        # If done then clean the history of observations.
+        masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
+
+        bad_masks = torch.FloatTensor(
+            [
+                [0.0] if info.get("TimeLimit.truncated", False) else [1.0]
+                for info in infos
+            ]
+        )
+        for i in range(len(agents)):
+            agents[i].storage.insert(
+                obs[i],
+                n_recurrent_hidden_states[i],
+                n_action[i],
+                n_action_log_prob[i],
+                n_value[i],
+                reward[:, i].unsqueeze(1),
+                masks,
+                bad_masks,
+            )
+
+        for info in infos:
+            if info:
+                all_infos.append(info)
+
     def train(
         _run,
         _log,
@@ -249,115 +336,88 @@ class SeacTrainer:
         eval_dir,
         log_interval,
         save_interval,
-        eval_interval,
-    ):
+        eval_interval):
+        logger.info(".")
+        if loss_dir:
+            loss_dir = path.expanduser(loss_dir.format(id=str(_run._id)))
+            utils.cleanup_log_dir(loss_dir)
+            writer = SummaryWriter(loss_dir)
+        else:
+            writer = None
+
+        eval_dir = path.expanduser(eval_dir.format(id=str(_run._id)))
+        save_dir = path.expanduser(save_dir.format(id=str(_run._id)))
+
+        utils.cleanup_log_dir(eval_dir)
+        utils.cleanup_log_dir(save_dir)
+
+        torch.set_num_threads(1)
+        envs = make_vec_envs(
+            env_name,
+            seed,
+            dummy_vecenv,
+            algorithm["num_processes"],
+            time_limit,
+            wrappers,
+            algorithm["device"],
+        )
+        logger.info(f"seed:{seed}")
+
+        agents = [
+            A2C(i, osp, asp)
+            for i, (osp, asp) in enumerate(zip(envs.observation_space, envs.action_space))
+        ]
+        obs = envs.reset()
+
+        for i in range(len(obs)):
+            agents[i].storage.obs[0].copy_(obs[i])
+            agents[i].storage.to(algorithm["device"])
+
+        start = time.time()
+        num_updates = (
+            int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
+        )
+        logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
+
+        algo_num_steps = algorithm["num_steps"] # 5
+        logger.info(f"algorithm[num_steps]:{algo_num_steps}")
+
+        algo_num_processes = algorithm["num_processes"] # 4
+        logger.info(f"algorithm[num_processes]:{algo_num_processes}")
+
+        logger.info(f"num_updates:{num_updates}") # 5000000
+
+        all_infos = deque(maxlen=10)
+
+        # for j in range(1, num_updates + 1):
         for j in tqdm(range(1, num_updates + 1)):
+            self.do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates)
 
-            for step in range(algorithm["num_steps"]):
-                # Sample actions
-                with torch.no_grad():
-                    n_value, n_action, n_action_log_prob, n_recurrent_hidden_states = zip(
-                        *[
-                            agent.model.act(
-                                agent.storage.obs[step],
-                                agent.storage.recurrent_hidden_states[step],
-                                agent.storage.masks[step],
-                            )
-                            for agent in agents
-                        ]
-                    )
-                # Obser reward and next obs
-                obs, reward, done, infos = envs.step(n_action)
-                # envs.envs[0].render()
-
-                # If done then clean the history of observations.
-                masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
-
-                bad_masks = torch.FloatTensor(
-                    [
-                        [0.0] if info.get("TimeLimit.truncated", False) else [1.0]
-                        for info in infos
-                    ]
-                )
-                for i in range(len(agents)):
-                    agents[i].storage.insert(
-                        obs[i],
-                        n_recurrent_hidden_states[i],
-                        n_action[i],
-                        n_action_log_prob[i],
-                        n_value[i],
-                        reward[:, i].unsqueeze(1),
-                        masks,
-                        bad_masks,
-                    )
-                    
-                for info in infos:
-                    if info:
-                        all_infos.append(info)
-
-            # value_loss, action_loss, dist_entropy = agent.update(rollouts)
-            for agent in agents:
-                agent.compute_returns()
-
-            for agent in agents:
-                loss = agent.update([a.storage for a in agents])
-                for k, v in loss.items():
-                    if writer:
-                        writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
+        envs.close()
 
 
-            for agent in agents:
-                agent.storage.after_update()
 
-            if j % log_interval == 0 and len(all_infos) > 1:
-                squashed = self._squash_info(all_infos)
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("env_name", help="env_name", type=str)
+    args = parser.parse_args()
 
-                total_num_steps = (
-                    (j + 1) * algorithm["num_processes"] * algorithm["num_steps"]
-                )
-                end = time.time()
-                _log.info(
-                    f"Updates {j}, num timesteps {total_num_steps}, FPS {int(total_num_steps / (end - start))}"
-                )
-                _log.info(
-                    f"Last {len(all_infos)} training episodes mean reward {squashed['episode_reward'].sum():.3f}"
-                )
-
-                for k, v in squashed.items():
-                    _run.log_scalar(k, v, j)
-                all_infos.clear()
-
-            if save_interval is not None and (
-                j > 0 and j % save_interval == 0 or j == num_updates
-            ):
-                cur_save_dir = path.join(save_dir, f"u{j}")
-                for agent in agents:
-                    save_at = path.join(cur_save_dir, f"agent{agent.agent_id}")
-                    os.makedirs(save_at, exist_ok=True)
-                    agent.save(save_at)
-                archive_name = shutil.make_archive(cur_save_dir, "xztar", save_dir, f"u{j}")
-                shutil.rmtree(cur_save_dir)
-                _run.add_artifact(archive_name)
-
-            if eval_interval is not None and (
-                j > 0 and j % eval_interval == 0 or j == num_updates
-            ):
-                evaluate(
-                    agents, os.path.join(eval_dir, f"u{j}"),
-                )
-                videos = glob.glob(os.path.join(eval_dir, f"u{j}") + "/*.mp4")
-                for i, v in enumerate(videos):
-                    _run.add_artifact(v, f"u{j}.{i}.mp4")
-        envs.close()    
+    sTrainer = SeacTrainer(args.env_name)
+    sTrainer.config()
+    sTrainer.train(_run,
+        _log,
+        algorithm,
+        save_dir,
+        eval_dir,
+        log_interval,
+        save_interval,
+        eval_interval)
 
 
 if __name__ == "__main__":
     # app.run(main)
     main()
     
-## ----------------------------------------------------------------------------------------
-## ----------------------------------------------------------------------------------------
-
 
 
 

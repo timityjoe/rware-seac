@@ -16,20 +16,22 @@ from sacred.observers import (  # noqa
     QueuedMongoObserver,
     QueueObserver,
 )
+import torch
 from torch.utils.tensorboard import SummaryWriter
-
-import utils
 from a2c import A2C, algorithm
 from envs import make_vec_envs
 from wrappers import RecordEpisodeStatistics, SquashDones
 from model import Policy
 
-# import robotic_warehouse # noqa
 import rware
-# import lbforaging # noqa
+# from utils import cleanup_log_dir
+import utils
 
+import logging
 from tqdm import tqdm
 from loguru import logger
+
+
 
 ex = Experiment(ingredients=[algorithm])
 ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
@@ -148,6 +150,65 @@ def evaluate(
         f"Evaluation using {len(all_infos)} episodes: mean reward {info['episode_reward']:.5f}\n"
     )
 
+
+def do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates):
+    for step in range(algorithm["num_steps"]):
+        do_sample_action(agents, envs, step, all_infos)
+
+    # value_loss, action_loss, dist_entropy = agent.update(rollouts)
+    for agent in agents:
+        agent.compute_returns()
+
+    for agent in agents:
+        loss = agent.update([a.storage for a in agents])
+        for k, v in loss.items():
+            if writer:
+                writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
+
+    for agent in agents:
+        agent.storage.after_update()
+
+    if j % log_interval == 0 and len(all_infos) > 1:
+        squashed = _squash_info(all_infos)
+
+        total_num_steps = (
+            (j + 1) * algorithm["num_processes"] * algorithm["num_steps"]
+        )
+        end = time.time()
+        _log.info(
+            f"Updates {j}, num timesteps {total_num_steps}, FPS {int(total_num_steps / (end - start))}"
+        )
+        _log.info(
+            f"Last {len(all_infos)} training episodes mean reward {squashed['episode_reward'].sum():.3f}"
+        )
+
+        for k, v in squashed.items():
+            _run.log_scalar(k, v, j)
+        all_infos.clear()
+
+    if save_interval is not None and (
+        j > 0 and j % save_interval == 0 or j == num_updates
+    ):
+        cur_save_dir = path.join(save_dir, f"u{j}")
+        for agent in agents:
+            save_at = path.join(cur_save_dir, f"agent{agent.agent_id}")
+            os.makedirs(save_at, exist_ok=True)
+            agent.save(save_at)
+        archive_name = shutil.make_archive(cur_save_dir, "xztar", save_dir, f"u{j}")
+        shutil.rmtree(cur_save_dir)
+        _run.add_artifact(archive_name)
+
+    if eval_interval is not None and (
+        j > 0 and j % eval_interval == 0 or j == num_updates
+    ):
+        evaluate(
+            agents, os.path.join(eval_dir, f"u{j}"),
+        )
+        videos = glob.glob(os.path.join(eval_dir, f"u{j}") + "/*.mp4")
+        for i, v in enumerate(videos):
+            _run.add_artifact(v, f"u{j}.{i}.mp4")
+
+
 def do_sample_action(agents, envs, step, all_infos):
     # Sample actions
     with torch.no_grad():
@@ -190,6 +251,7 @@ def do_sample_action(agents, envs, step, all_infos):
         if info:
             all_infos.append(info)
 
+
 @ex.automain
 def main(
     _run,
@@ -208,7 +270,7 @@ def main(
     save_interval,
     eval_interval,
 ):
-    logger.info(".")
+    
     if loss_dir:
         loss_dir = path.expanduser(loss_dir.format(id=str(_run._id)))
         utils.cleanup_log_dir(loss_dir)
@@ -231,12 +293,20 @@ def main(
         time_limit,
         wrappers,
         algorithm["device"],
+
     )
+    logger.info(f"env_name:{env_name}")
+    logger.info(f"dummy_vecenv:{dummy_vecenv}")
+    logger.info(f"time_limit:{time_limit}")
+    logger.info(f"wrappers:{wrappers}")
+    logger.info(f"seed:{seed}")
 
     agents = [
         A2C(i, osp, asp)
         for i, (osp, asp) in enumerate(zip(envs.observation_space, envs.action_space))
     ]
+    logger.info(f"agents:{agents}")
+
     obs = envs.reset()
 
     for i in range(len(obs)):
@@ -247,65 +317,22 @@ def main(
     num_updates = (
         int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
     )
+    logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
+
+    algo_num_steps = algorithm["num_steps"] # 5
+    logger.info(f"algorithm[num_steps]:{algo_num_steps}")
+
+    algo_num_processes = algorithm["num_processes"] # 4
+    logger.info(f"algorithm[num_processes]:{algo_num_processes}")
+
+    logger.info(f"num_updates:{num_updates}") # 5000000
 
     all_infos = deque(maxlen=10)
 
     # for j in range(1, num_updates + 1):
     for j in tqdm(range(1, num_updates + 1)):
+        do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates)
 
-        for step in range(algorithm["num_steps"]):
-            do_sample_action(agents, envs, step, all_infos)
-
-        # value_loss, action_loss, dist_entropy = agent.update(rollouts)
-        for agent in agents:
-            agent.compute_returns()
-
-        for agent in agents:
-            loss = agent.update([a.storage for a in agents])
-            for k, v in loss.items():
-                if writer:
-                    writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
-
-        for agent in agents:
-            agent.storage.after_update()
-
-        if j % log_interval == 0 and len(all_infos) > 1:
-            squashed = _squash_info(all_infos)
-
-            total_num_steps = (
-                (j + 1) * algorithm["num_processes"] * algorithm["num_steps"]
-            )
-            end = time.time()
-            _log.info(
-                f"Updates {j}, num timesteps {total_num_steps}, FPS {int(total_num_steps / (end - start))}"
-            )
-            _log.info(
-                f"Last {len(all_infos)} training episodes mean reward {squashed['episode_reward'].sum():.3f}"
-            )
-
-            for k, v in squashed.items():
-                _run.log_scalar(k, v, j)
-            all_infos.clear()
-
-        if save_interval is not None and (
-            j > 0 and j % save_interval == 0 or j == num_updates
-        ):
-            cur_save_dir = path.join(save_dir, f"u{j}")
-            for agent in agents:
-                save_at = path.join(cur_save_dir, f"agent{agent.agent_id}")
-                os.makedirs(save_at, exist_ok=True)
-                agent.save(save_at)
-            archive_name = shutil.make_archive(cur_save_dir, "xztar", save_dir, f"u{j}")
-            shutil.rmtree(cur_save_dir)
-            _run.add_artifact(archive_name)
-
-        if eval_interval is not None and (
-            j > 0 and j % eval_interval == 0 or j == num_updates
-        ):
-            evaluate(
-                agents, os.path.join(eval_dir, f"u{j}"),
-            )
-            videos = glob.glob(os.path.join(eval_dir, f"u{j}") + "/*.mp4")
-            for i, v in enumerate(videos):
-                _run.add_artifact(v, f"u{j}.{i}.mp4")
     envs.close()
+
+

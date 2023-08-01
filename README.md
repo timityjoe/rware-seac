@@ -32,7 +32,9 @@ python3 train.py with <env config>
 python3 train.py with env_name=rware-tiny-2ag-v1 time_limit=500
 python3 train.py with env_name=rware-tiny-4ag-v1 time_limit=500
 
+python3 seac_trainer.py with env_name=rware-tiny-4ag-v1 time_limit=500
 python3 seac/seac_trainer.py with env_name=rware-tiny-4ag-v1 time_limit=500
+python3 seac/seac_trainer2.py env_name=rware-tiny-4ag-v1
 
 tensorboard --logdir='$WORKSPACE/marl/rware-seac' --port=8080 
 tensorboard --logdir=./ --port=8080

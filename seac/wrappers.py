@@ -9,7 +9,7 @@ from gym import ObservationWrapper, spaces
 from gym.wrappers import TimeLimit as GymTimeLimit
 from gym.wrappers import Monitor as GymMonitor
 
-
+# gym.Wrapper inherits from gym.Env
 class RecordEpisodeStatistics(gym.Wrapper):
     """ Multi-agent version of RecordEpisodeStatistics gym wrapper"""
 
