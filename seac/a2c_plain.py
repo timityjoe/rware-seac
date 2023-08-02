@@ -11,54 +11,34 @@ import gym
 from seac.model import Policy, FCNetwork
 from gym.spaces.utils import flatdim
 from seac.storage import RolloutStorage
-from sacred import Ingredient
 
 from loguru import logger
 
 
-algorithm = Ingredient("algorithm")
 
-# @algorithm.config
-# def algo_config():
-#     logger.info(".")
-
-#     lr = 3e-4
-#     adam_eps = 0.001
-#     gamma = 0.99
-#     use_gae = False
-#     gae_lambda = 0.95
-#     entropy_coef = 0.01
-#     value_loss_coef = 0.5
-#     max_grad_norm = 0.5
-
-#     use_proper_time_limits = True
-#     recurrent_policy = False
-#     use_linear_lr_decay = False
-
-#     seac_coef = 1.0
-
-#     num_processes = 4
-#     num_steps = 5
-
-#     device = "cpu"
-
-
-class A2C:
-    @algorithm.capture()
+class A2C_plain:
     def __init__(
         self,
         agent_id,
         obs_space,
         action_space,
-        lr,
-        adam_eps,
-        recurrent_policy,
-        num_steps,
-        num_processes,
-        device,
     ):
         logger.info(".")
-        self.algo_config()
+        self.lr = 3e-4
+        self.adam_eps = 0.001
+        self.gamma = 0.99
+        self.use_gae = False
+        self.gae_lambda = 0.95
+        self.entropy_coef = 0.01
+        self.value_loss_coef = 0.5
+        self.max_grad_norm = 0.5
+        self.use_proper_time_limits = True
+        self.recurrent_policy = False
+        self.use_linear_lr_decay = False
+        self.seac_coef = 1.0
+        self.num_processes = 4
+        self.num_steps = 5
+        self.device = "cpu"
 
         self.agent_id = agent_id
         self.obs_size = flatdim(obs_space)
@@ -67,49 +47,25 @@ class A2C:
         self.action_space = action_space
 
         self.model = Policy(
-            obs_space, action_space, base_kwargs={"recurrent": recurrent_policy},
+            obs_space, action_space, base_kwargs={"recurrent": self.recurrent_policy},
         )
 
         self.storage = RolloutStorage(
             obs_space,
             action_space,
             self.model.recurrent_hidden_state_size,
-            num_steps,
-            num_processes,
+            self.num_steps,
+            self.num_processes,
         )
 
-        self.model.to(device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr, eps=adam_eps)
+        self.model.to(self.device)
+        self.optimizer = optim.Adam(self.model.parameters(), lr, eps=self.adam_eps)
 
         # self.intr_stats = RunningStats()
         self.saveables = {
             "model": self.model,
             "optimizer": self.optimizer,
         }
-
-    @algorithm.config
-    def algo_config():
-        logger.info(".")
-
-        lr = 3e-4
-        adam_eps = 0.001
-        gamma = 0.99
-        use_gae = False
-        gae_lambda = 0.95
-        entropy_coef = 0.01
-        value_loss_coef = 0.5
-        max_grad_norm = 0.5
-
-        use_proper_time_limits = True
-        recurrent_policy = False
-        use_linear_lr_decay = False
-
-        seac_coef = 1.0
-
-        num_processes = 4
-        num_steps = 5
-
-        device = "cpu"
 
 
     def save(self, path):
@@ -120,7 +76,6 @@ class A2C:
         for k, v in self.saveables.items():
             v.load_state_dict(checkpoint[k].state_dict())
 
-    @algorithm.capture
     def compute_returns(self, use_gae, gamma, gae_lambda, use_proper_time_limits):
         with torch.no_grad():
             next_value = self.model.get_value(
@@ -133,7 +88,7 @@ class A2C:
             next_value, use_gae, gamma, gae_lambda, use_proper_time_limits,
         )
 
-    @algorithm.capture
+
     def update(
         self,
         storages,
@@ -143,6 +98,7 @@ class A2C:
         max_grad_norm,
         device,
     ):
+        self.device = device
 
         obs_shape = self.storage.obs.size()[2:]
         action_shape = self.storage.actions.size()[-1]
