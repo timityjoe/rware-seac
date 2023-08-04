@@ -8,35 +8,39 @@ import torch.nn.functional as F
 import numpy as np
 
 import gym
-from model import Policy, FCNetwork
+from seac.model import Policy, FCNetwork
 from gym.spaces.utils import flatdim
-from storage import RolloutStorage
+from seac.storage import RolloutStorage
 from sacred import Ingredient
+
+from loguru import logger
+
 
 algorithm = Ingredient("algorithm")
 
+# @algorithm.config
+# def algo_config():
+#     logger.info(".")
 
-@algorithm.config
-def config():
-    lr = 3e-4
-    adam_eps = 0.001
-    gamma = 0.99
-    use_gae = False
-    gae_lambda = 0.95
-    entropy_coef = 0.01
-    value_loss_coef = 0.5
-    max_grad_norm = 0.5
+#     lr = 3e-4
+#     adam_eps = 0.001
+#     gamma = 0.99
+#     use_gae = False
+#     gae_lambda = 0.95
+#     entropy_coef = 0.01
+#     value_loss_coef = 0.5
+#     max_grad_norm = 0.5
 
-    use_proper_time_limits = True
-    recurrent_policy = False
-    use_linear_lr_decay = False
+#     use_proper_time_limits = True
+#     recurrent_policy = False
+#     use_linear_lr_decay = False
 
-    seac_coef = 1.0
+#     seac_coef = 1.0
 
-    num_processes = 4
-    num_steps = 5
+#     num_processes = 4
+#     num_steps = 5
 
-    device = "cpu"
+#     device = "cpu"
 
 
 class A2C:
@@ -53,6 +57,9 @@ class A2C:
         num_processes,
         device,
     ):
+        logger.info(".")
+        self.algo_config()
+
         self.agent_id = agent_id
         self.obs_size = flatdim(obs_space)
         self.action_size = flatdim(action_space)
@@ -79,6 +86,31 @@ class A2C:
             "model": self.model,
             "optimizer": self.optimizer,
         }
+
+    @algorithm.config
+    def algo_config():
+        logger.info(".")
+
+        lr = 3e-4
+        adam_eps = 0.001
+        gamma = 0.99
+        use_gae = False
+        gae_lambda = 0.95
+        entropy_coef = 0.01
+        value_loss_coef = 0.5
+        max_grad_norm = 0.5
+
+        use_proper_time_limits = True
+        recurrent_policy = False
+        use_linear_lr_decay = False
+
+        seac_coef = 1.0
+
+        num_processes = 4
+        num_steps = 5
+
+        device = "cpu"
+
 
     def save(self, path):
         torch.save(self.saveables, os.path.join(path, "models.pt"))

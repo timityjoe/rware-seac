@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils import init
+from seac.utils import init
 
 """
 Modify standard PyTorch distributions so they are compatible with this code.

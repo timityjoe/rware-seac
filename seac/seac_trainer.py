@@ -18,7 +18,10 @@ from sacred.observers import (  # noqa
 )
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from seac.a2c import A2C, algorithm
+
+# from seac.a2c_plain import A2C_plain
+from seac.a2c_plain import A2C_plain as a2c_algorithm
+
 from seac.envs import make_vec_envs
 from seac.wrappers import RecordEpisodeStatistics, SquashDones
 from seac.model import Policy
@@ -33,9 +36,9 @@ from loguru import logger
 
 
 
-ex = Experiment(ingredients=[algorithm])
-ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
-ex.observers.append(FileStorageObserver("./results/sacred"))
+# ex = Experiment(ingredients=[a2c_algorithm.])
+# a2c_algorithm..captured_out_filter = lambda captured_output: "Output capturing turned off."
+# a2c_algorithm..observers.append(FileStorageObserver("./results/sacred"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,9 +47,8 @@ logging.basicConfig(
 )
 
 
-@ex.config
-def config():
-    logger.info(".")
+def seac_config():
+    logger.info("seac_config")
     env_name = None
     time_limit = None
     wrappers = (
@@ -66,13 +68,30 @@ def config():
     eval_interval = int(1e6)
     episodes_per_eval = 8
 
+    # From a2c.py
+    lr = 3e-4
+    adam_eps = 0.001
+    gamma = 0.99
+    use_gae = False
+    gae_lambda = 0.95
+    entropy_coef = 0.01
+    value_loss_coef = 0.5
+    max_grad_norm = 0.5
+    use_proper_time_limits = True
+    recurrent_policy = False
+    use_linear_lr_decay = False
+    seac_coef = 1.0
+    num_processes = 4
+    num_steps = 5
+    device = "cpu"
+
 
 for conf in glob.glob("configs/*.yaml"):
     name = f"{Path(conf).stem}"
-    ex.add_named_config(name, conf)
+    a2c_algorithm.add_named_config(name, conf)
 
 def _squash_info(info):
-    logger.info(".")
+    logger.info("_squash_info")
     info = [i for i in info if i]
     new_info = {}
     keys = set([k for i in info for k in i.keys()])
@@ -83,7 +102,6 @@ def _squash_info(info):
     return new_info
 
 
-@ex.capture
 def evaluate(
     agents,
     monitor_dir,
@@ -93,11 +111,11 @@ def evaluate(
     wrappers,
     dummy_vecenv,
     time_limit,
-    algorithm,
+    a2c_algorithm,
     _log,
 ):
-    logger.info(".")
-    device = algorithm["device"]
+    logger.info("evaluate")
+    device = a2c_algorithm.device
 
     eval_envs = make_vec_envs(
         env_name,
@@ -151,8 +169,8 @@ def evaluate(
     )
 
 
-def do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates):
-    for step in range(algorithm["num_steps"]):
+def do_update(j, _run, _log, a2c_algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates):
+    for step in range(a2c_algorithm.num_steps):
         do_sample_action(agents, envs, step, all_infos)
 
     # value_loss, action_loss, dist_entropy = agent.update(rollouts)
@@ -172,7 +190,7 @@ def do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, 
         squashed = _squash_info(all_infos)
 
         total_num_steps = (
-            (j + 1) * algorithm["num_processes"] * algorithm["num_steps"]
+            (j + 1) * a2c_algorithm.num_processes * a2c_algorithm.num_steps
         )
         end = time.time()
         _log.info(
@@ -252,39 +270,44 @@ def do_sample_action(agents, envs, step, all_infos):
             all_infos.append(info)
 
 
-def initalize(agents, num_env_steps, algorithm, envs):
-        obs = envs.reset()
+def initalize_seac_trainer(agents, num_env_steps, envs):
+    obs = envs.reset()
 
-        for i in range(len(obs)):
-            agents[i].storage.obs[0].copy_(obs[i])
-            agents[i].storage.to(algorithm["device"])
+    logger.info(f"num agents:{len(agents)}")
+    logger.info(f"num_env_steps:{num_env_steps}")
+    logger.info(f"a2c_algorithm.:{a2c_algorithm}")
+    logger.info(f"envs:{envs}")
 
-        start = time.time()
-        num_updates = (
-            int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
-        )
-        logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
+    for i in range(len(obs)):
+        logger.info(f"len(obs):{len(obs)}, obs[i]:{obs[i]}")
+        agents[i].storage.obs[0].copy_(obs[i])
+        agents[i].storage.to(a2c_algorithm.device)
 
-        algo_num_steps = algorithm["num_steps"] # 5
-        logger.info(f"algorithm[num_steps]:{algo_num_steps}")
+    start = time.time()
+    num_updates = (
+        int(num_env_steps) // a2c_algorithm.num_steps // a2c_algorithm.num_processes
+    )
+    logger.info(f"num_env_steps:{num_env_steps}")   # 100000000
 
-        algo_num_processes = algorithm["num_processes"] # 4
-        logger.info(f"algorithm[num_processes]:{algo_num_processes}")
+    algo_num_steps = a2c_algorithm.num_steps # 5
+    logger.info(f"a2c_algorithm.num_steps:{algo_num_steps}")
 
-        logger.info(f"num_updates:{num_updates}") # 5000000
+    algo_num_processes = a2c_algorithm.num_processes # 4
+    logger.info(f"a2c_algorithm.num_processes:{algo_num_processes}")
 
-        all_infos = deque(maxlen=10)   
-        return all_infos, start, num_updates
+    logger.info(f"num_updates:{num_updates}") # 5000000
+
+    all_infos = deque(maxlen=10)   
+    return all_infos, start, num_updates
 
 
-@ex.automain
 def main(
     _run,
     _log,
     num_env_steps,
     env_name,
     seed,
-    algorithm,
+    a2c_algorithm,
     dummy_vecenv,
     time_limit,
     wrappers,
@@ -295,7 +318,7 @@ def main(
     save_interval,
     eval_interval,
 ):
-    logger.info(".")
+    logger.info("main")
     if loss_dir:
         loss_dir = path.expanduser(loss_dir.format(id=str(_run._id)))
         utils.cleanup_log_dir(loss_dir)
@@ -314,12 +337,16 @@ def main(
         env_name,
         seed,
         dummy_vecenv,
-        algorithm["num_processes"],
+        a2c_algorithm.num_processes,
         time_limit,
         wrappers,
-        algorithm["device"],
+        a2c_algorithm.device,
 
     )
+    algo_num_processes = a2c_algorithm.num_processes
+    algo_device = a2c_algorithm.device
+    logger.info(f"algo_num_processes:{algo_num_processes}")
+    logger.info(f"algo_device:{algo_device}")    
     logger.info(f"env_name:{env_name}")
     logger.info(f"dummy_vecenv:{dummy_vecenv}")
     logger.info(f"time_limit:{time_limit}")
@@ -327,14 +354,14 @@ def main(
     logger.info(f"seed:{seed}")
 
     agents = [
-        A2C(i, osp, asp)
+        A2C_plain(i, osp, asp)
         for i, (osp, asp) in enumerate(zip(envs.observation_space, envs.action_space))
     ]
-    all_infos, start, num_updates = initalize(agents, num_env_steps, algorithm, envs)
+    all_infos, start, num_updates = initalize_seac(agents, num_env_steps, envs)
 
     # for j in range(1, num_updates + 1):
     for j in tqdm(range(1, num_updates + 1)):
-        do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates)
+        do_update(j, _run, _log, a2c_algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates)
 
     envs.close()
 
