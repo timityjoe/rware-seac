@@ -18,14 +18,15 @@ from sacred.observers import (  # noqa
 )
 import torch
 from torch.utils.tensorboard import SummaryWriter
-from seac.a2c_plain import A2C_plain
-from seac.envs import make_vec_envs
-from seac.wrappers import RecordEpisodeStatistics, SquashDones
-from seac.model import Policy
+from a2c import A2C, algorithm
+from envs import make_vec_envs
+from wrappers import RecordEpisodeStatistics, SquashDones
+from model import Policy
 
 import rware
+print(rware.__path__)
 # from utils import cleanup_log_dir
-import seac.utils as utils
+import utils as utils
 
 import logging
 from tqdm import tqdm
@@ -33,9 +34,9 @@ from loguru import logger
 
 
 
-# ex = Experiment(ingredients=[algorithm])
-# algorithm.captured_out_filter = lambda captured_output: "Output capturing turned off."
-# algorithm.observers.append(FileStorageObserver("./results/sacred"))
+ex = Experiment(ingredients=[algorithm])
+ex.captured_out_filter = lambda captured_output: "Output capturing turned off."
+ex.observers.append(FileStorageObserver("./results/sacred"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +44,7 @@ logging.basicConfig(
     datefmt="%m/%d %H:%M:%S",
 )
 
-
+@ex.config
 def seac_config():
     logger.info("seac_config")
     env_name = None
@@ -98,7 +99,9 @@ def _squash_info(info):
         new_info[key] = mean
     return new_info
 
-
+#-------------------------------------------------
+# THIS FUNCTION IS NOT IN USE...!!
+@ex.capture
 def evaluate(
     agents,
     monitor_dir,
@@ -149,6 +152,8 @@ def evaluate(
                 ]
             )
 
+        logger.info(f"n_action:{n_action}")
+
         # Obser reward and next obs
         n_obs, _, done, infos = eval_envs.step(n_action)
 
@@ -164,6 +169,9 @@ def evaluate(
     _log.info(
         f"Evaluation using {len(all_infos)} episodes: mean reward {info['episode_reward']:.5f}\n"
     )
+# THIS FUNCTION IS NOT IN USE...!!
+#-------------------------------------------------
+
 
 
 def do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates):
@@ -237,9 +245,19 @@ def do_sample_action(agents, envs, step, all_infos):
                 for agent in agents
             ]
         )
+
+    # n_action is a list(actions), where each is action is 4 items
+    logger.info(f"n_action:{n_action}, len:{len(n_action)}, n_action[0]:{n_action[0]}, n_action[0][0]:{n_action[0][0]}")
+
     # Obser reward and next obs
     obs, reward, done, infos = envs.step(n_action)
     # envs.envs[0].render()
+    # logger.info(f"reward:{reward}")
+    # logger.info(f"done:{done}")
+    # logger.info(f"infos:{infos}")
+    # logger.info(f"obs[0]:{obs[0]}, size:{len(obs[0])}")           # size = num agents
+    # logger.info(f"obs[0][0]:{obs[0][0]}, size:{len(obs[0][0])}")    #size = 71
+    # logger.info(f"obs:{obs}")
 
     # If done then clean the history of observations.
     masks = torch.FloatTensor([[0.0] if done_ else [1.0] for done_ in done])
@@ -296,7 +314,7 @@ def initalize_seac(agents, num_env_steps, algorithm, envs):
     all_infos = deque(maxlen=10)   
     return all_infos, start, num_updates
 
-
+@ex.automain
 def main(
     _run,
     _log,
@@ -337,7 +355,6 @@ def main(
         time_limit,
         wrappers,
         algorithm["device"],
-
     )
     algo_num_processes = algorithm["num_processes"]
     algo_device = algorithm["device"]
@@ -350,13 +367,14 @@ def main(
     logger.info(f"seed:{seed}")
 
     agents = [
-        A2C_plain(i, osp, asp)
+        A2C(i, osp, asp)
         for i, (osp, asp) in enumerate(zip(envs.observation_space, envs.action_space))
     ]
     all_infos, start, num_updates = initalize_seac(agents, num_env_steps, algorithm, envs)
 
     # for j in range(1, num_updates + 1):
     for j in tqdm(range(1, num_updates + 1)):
+        envs.render()
         do_update(j, _run, _log, algorithm, writer, agents, envs, all_infos, start, log_interval, save_interval, eval_interval, num_updates)
 
     envs.close()

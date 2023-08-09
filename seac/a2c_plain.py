@@ -8,9 +8,9 @@ import torch.nn.functional as F
 import numpy as np
 
 import gym
-from seac.model import Policy, FCNetwork
+from model import Policy, FCNetwork
 from gym.spaces.utils import flatdim
-from seac.storage import RolloutStorage
+from storage import RolloutStorage
 
 from loguru import logger
 

@@ -24,10 +24,8 @@ from envs import make_vec_envs
 from wrappers import RecordEpisodeStatistics, SquashDones
 from model import Policy
 
-# import robotic_warehouse # noqa
-import rware
-import lbforaging # noqa
-
+import rware # noqa
+# import lbforaging # noqa
 from tqdm import tqdm
 from loguru import logger
 
@@ -93,7 +91,6 @@ def evaluate(
     _log,
 ):
     device = algorithm["device"]
-    logger.info(f"device:{device}")
 
     eval_envs = make_vec_envs(
         env_name,
@@ -105,7 +102,6 @@ def evaluate(
         device,
         monitor_dir=monitor_dir,
     )
-    logger.info(f"eval_envs:{eval_envs}")
 
     n_obs = eval_envs.reset()
     n_recurrent_hidden_states = [
@@ -190,8 +186,6 @@ def main(
         wrappers,
         algorithm["device"],
     )
-    logger.info(f"env_name:{env_name}")
-    logger.info(f"envs:{envs}")
 
     agents = [
         A2C(i, osp, asp)
@@ -207,7 +201,6 @@ def main(
     num_updates = (
         int(num_env_steps) // algorithm["num_steps"] // algorithm["num_processes"]
     )
-    logger.info(f"num_updates:{num_updates}")
 
     all_infos = deque(maxlen=10)
 
@@ -250,7 +243,7 @@ def main(
                     masks,
                     bad_masks,
                 )
-                
+
             for info in infos:
                 if info:
                     all_infos.append(info)
@@ -264,7 +257,6 @@ def main(
             for k, v in loss.items():
                 if writer:
                     writer.add_scalar(f"agent{agent.agent_id}/{k}", v, j)
-
 
         for agent in agents:
             agent.storage.after_update()

@@ -3,10 +3,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from seac.distributions import Categorical
-from seac.utils import init
+from distributions import Categorical
+from utils import init
 
-from loguru import logger
 
 class Flatten(nn.Module):
     def forward(self, x):
@@ -58,8 +57,6 @@ class Policy(nn.Module):
         self.base = MLPBase(obs_shape[0], **base_kwargs)
 
         num_outputs = action_space.n
-        logger.info(f"num_outputs:{num_outputs}")
-
         self.dist = Categorical(self.base.output_size, num_outputs)
 
     @property

@@ -9,7 +9,7 @@ from gym.wrappers import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecEnvWrapper
 from stable_baselines3.common.vec_env.vec_video_recorder import VecVideoRecorder
 from stable_baselines3.common.vec_env.vec_normalize import VecNormalize as VecNormalize_
-from seac.wrappers import TimeLimit, Monitor
+from wrappers import TimeLimit, Monitor
 
 
 class MADummyVecEnv(DummyVecEnv):
